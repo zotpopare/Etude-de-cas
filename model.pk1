@@ -1,1 +1,1252 @@
+Home Credit Default Risk
+Bruce Wayne
+June 26, 2018
+Introduction
+Libraries and Functions
+Data Overview
+Cleaning the data
+Chapter 3: Data Pre Processing
+Data Transformations
+Handling Missing Values
+Data Reduction and Feature Extraction
+Removing Predictors
+Adding Predictors
+Binning Predictors
+Chapter 4: Over-Fitting and Model Tuning
+Overfitting and its Problems
+Model Tuning
+Data Splitting
+Resampling Techniques
+Data Splitting Recommendations
+Choosing Between Models
+Running a Simple model
+Chapter 5: Measuring Performance in Regression Models
+Variance-Bias Trade off
+Chapter 7: Nonlinear Regression Models
+Support Vector Machines (SVM)
+K-Nearest Neighbors (KNN)
+Chapter 11: Measuring Performance in Classification Models
+Class Predictions
+Evaluating Predicted Classes
+Evaluating Class Probabilities
+Chapter 12.2: Logistic Regression
+Chapter 14: Classification Trees and Rule-Based Models
+Rule Based Models
+The purpose of this kernel is to provide a brief summary of each of the chapters in the Applied Predictive Modelling book by Max Kuhn Author and Kjell Johnson Author (The book has received a 4.5 stars out of 5 on Amazon.com) Each section in the kernel would be covering one chapter, the key points noted down along with the findings using the competitions dataset.
 
+
+Please comment/upvote if you think that the kernel is useful. I am still in the learning process and would love feedback.
+
+All the important terms have been bolded
+Any comment/thoughts not from the book has been italicized. Feel free to comment and/or challenge those
+
+Introduction
+In this competition, we are asked to predict the TARGET variable (Clients’ repayment abilities) There are a number of datasets which are provided but for the purpose of simplicity the application dataset will be used
+
+Libraries and Functions
+Let’s begin by loading the libraries and functions
+
+sample_size <- 1
+
+load.libraries <- c('plyr', 'dplyr','data.table', 'readxl', 'reshape2', 'stringr', 'stringi', 'ggplot2', 'tidyverse', 'gridExtra','matrixStats','lubridate','corrplot','e1071','xgboost','caret','zoo','factoextra','plotly','DT')
+install.lib <- load.libraries[!load.libraries %in% installed.packages()]
+for(libs in install.lib) install.packages(libs, dependences = TRUE)
+sapply(load.libraries, require, character = TRUE)
+##        plyr       dplyr  data.table      readxl    reshape2     stringr 
+##        TRUE        TRUE        TRUE        TRUE        TRUE        TRUE 
+##     stringi     ggplot2   tidyverse   gridExtra matrixStats   lubridate 
+##        TRUE        TRUE        TRUE        TRUE        TRUE        TRUE 
+##    corrplot       e1071     xgboost       caret         zoo  factoextra 
+##        TRUE        TRUE        TRUE        TRUE        TRUE        TRUE 
+##      plotly          DT 
+##        TRUE        TRUE
+#Function to change index to column
+index_to_col <- function(data, Column_Name){
+          data <- cbind(newColName = rownames(data), data)
+          rownames(data) <- 1:nrow(data)
+          colnames(data)[1] <- Column_Name
+          return (data)
+        }
+
+#Loading all the plotting functions
+plotHist <- function(data_in, i) {
+  data <- data.frame(x=data_in[[i]])
+  p <- ggplot(data=data, aes(x=x)) + geom_histogram(bins=100, fill="#0072B2", alpha = .9) + xlab(colnames(data_in)[i]) + theme_light() + 
+    theme(axis.text.x = element_text(angle = 90, hjust =1))
+  return (p)
+}
+
+plotBar <- function(data_in, i) {
+  data <- data.frame(cbind(x=data_in[[i]],y=dt1_tran[,c("TARGET")]))
+   data %>%
+   mutate(x = x,
+          class = as.character(y.TARGET)) %>%
+   group_by(x, class) %>%
+   summarise(count_class = n()) %>%
+   group_by(x) %>%
+   mutate(count_man = sum(count_class)) %>%
+   mutate(percent = count_class / count_man * 100) %>%
+   ungroup()  %>%
+    ggplot(aes(x = x,
+             y = percent,
+             group = class)) +
+    geom_bar(aes(fill = class, color=class), 
+           stat = "identity") +
+    geom_text(aes(label = sprintf("%0.1f%%", percent)),
+            position = position_stack(vjust = 0.5)) + theme_light() + theme_light() + 
+    theme(axis.text.x = element_text(angle = 90, hjust =1))+ theme(legend.position='none')
+   
+}
+
+plotCorr <- function(data_in, list1,list2,i){
+  data <- data.frame(x = data_in[[list1[i]]], y = data_in[[list2[i]]])
+  p <- ggplot(data, aes(x = x, y = y)) + geom_smooth(method = lm ) + geom_point(aes(x = x, y = y)) +
+  geom_jitter(width = 0.1, height = 0.1)  + xlab(paste0(list1[i], '\n', 'R-Squared: ', round(cor(data_in[[list1[i]]], data_in[[list2[i]]], use = 'pairwise.complete.obs'), 3))) + theme_light() + ylab(paste0(list2[i]))
+  return(suppressWarnings(p))
+}
+
+doPlotsCorr <- function(data_in, fun, list1,list2,ii, ncol=3) {
+  pp <- list()
+  for (i in ii) {
+    p <- fun(data_in=data_in, list1,list2,i=i)
+    pp <- c(pp, list(p))
+  }
+  do.call("grid.arrange", c(pp, ncol=ncol))
+}
+
+plotDen <- function(data_in, i) {
+  data <- data.frame(x=data_in[[i]])
+  p <- ggplot(data=data, aes(x=x)) + geom_density(aes(group=as.factor(dt1_tran$TARGET),color=as.factor(dt1_tran$TARGET),fill=as.factor(dt1_tran$TARGET), alpha=0.2)) + xlab(colnames(data_in)[i]) + theme_light() + 
+    theme(axis.text.x = element_text(angle = 90, hjust =1)) + theme(legend.position='none')
+  return (p)
+}
+
+doPlots <- function(data_in, fun, ii, ncol=3) {
+  pp <- list()
+  for (i in ii) {
+    p <- fun(data_in=data_in, i=i)
+    pp <- c(pp, list(p))
+  }
+  do.call("grid.arrange", c(pp, ncol=ncol))
+}
+Data Overview
+For simplicity, the application_train data will be used
+
+According to the data there are 307511 rows and 122 columns
+
+Cleaning the data
+Cleaning Rule 1
+There was a mistake in the data set which kagglers found and following is what the competition host said: “Thanks for asking the question as encoding of missing values hasn’t been explained. Value 365243 denotes infinity in DAYS variables in the datasets, therefore you can consider them NA values. Also XNA/XAP denote NA values”
+
+https://www.kaggle.com/c/home-credit-default-risk/discussion/57247
+
+According to the above, all the 365243 were replaced with NA
+
+Cleaning Rule 2
+There are predictors in the data which has all negative values and cannot be used to calculate skewness, hence I am changing the data which has negative values to abs to perform skewness analysis
+
+If there are any other cleaning rules (not handling missing values) that I have missed then please let me know in the comments
+
+Chapter 3: Data Pre Processing
+Data Transformations
+Centering and Scaling
+The most straighforward and common data transformation is to center scale the predictor values. To center the predictor variable, the average predictor value is subtracted from all the values. Similarly to scale the data, each value of the predictor variable is divided by its standard deviation.
+
+Skewness of the data
+The data also needs to be transformed because of the skewness (right skewed or left skewed). Replacing the data with log, sqrt or inverse may help to remove the skewness.
+
+Selecting only the numeric variables (integer and numeric) for the df since skewness only takes numeric variables
+
+Out of 122, there are 106 numeric columns in the data
+
+Exploratory (Exhaustive) Data Analysis
+The inspiration comes from a kernel in the House Prices: Advanced Regression Technique but I am not able to find the kernel. If you can then please let me know so that I can give credit where due :)
+
+Lets see the distribution of all 106 numeric columns in the data
+
+Plots1
+Plots2
+Plots3
+Plots4
+Plots5
+doPlots(dt1_num, plotHist, ii = 1:20)
+
+
+Skewness of the data (cont’d)
+Lets look at the skewness of all the columns. The table below shows a summary
+
+skewValues <- as.data.frame(apply(dt1_num, 2, function(x) skewness(x, na.rm = TRUE)))
+colnames(skewValues)[1] <- "skew_values"
+skewValues <- index_to_col(skewValues,'Column')
+skewValues <- setDT(skewValues)[order (skew_values, decreasing = TRUE)]
+skewValues[sample(1:nrow(skewValues), size = nrow(skewValues)),] %>% 
+  datatable(filter = 'top', options = list(
+    pageLength = 15, autoWidth = F
+  ))
+Show 
+15
+ entriesSearch:
+Column	skew_values
+All
+All
+1	REGION_RATING_CLIENT	0.0874674963919451
+2	FLAG_DOCUMENT_9	15.9275991408894
+3	ELEVATORS_AVG	2.43937771290142
+4	COMMONAREA_MEDI	5.419062971388
+5	AMT_INCOME_TOTAL	391.55583415493
+6	OBS_60_CNT_SOCIAL_CIRCLE	12.0707105456947
+7	LANDAREA_MODE	4.37692143517221
+8	DEF_60_CNT_SOCIAL_CIRCLE	5.27782663163098
+9	CNT_FAM_MEMBERS	0.987533179458047
+10	FLAG_DOCUMENT_7	72.1734038363897
+11	OWN_CAR_AGE	2.74534337722165
+12	BASEMENTAREA_MODE	3.48145097883227
+13	REG_REGION_NOT_WORK_REGION	4.09272681958666
+14	FLAG_DOCUMENT_2	153.790317025342
+15	FLAG_EMP_PHONE	-1.66487021939278
+Showing 1 to 15 of 106 entriesPrevious12345…8Next
+Box and Cox propose a family of transformations that indexed by a parameter, denoted as lambda. In addition to log transformations, this family can identify square transformations, square root, inverse and others.
+Box and Cox show how to use maximum likelihood estimation to determine the transformation parameter. This procedure will be applied independently to each predictor data that contain values greater than zero.
+
+The following table shows the Columns that needs to be transformed according to the Box and Cox and the respective lambda
+
+BoxCoxValues <- apply(dt1_num, 2, function(x) BoxCoxTrans(x, na.rm = TRUE))
+x = list()
+
+for (i in 1:ncol(dt1_num)){
+     lambda <- BoxCoxValues[[i]][[1]]
+     x[[i]] <- lambda
+}
+
+lambda = do.call(rbind, x)
+lambda_df <- as.data.frame(cbind(colnames(dt1_num),lambda))
+colnames(lambda_df)[1] <- "Column"
+colnames(lambda_df)[2] <- "lambda"
+knitr::kable(setDT(lambda_df)[!is.na(lambda)])
+Column	lambda
+DAYS_BIRTH	0.6
+SK_ID_CURR	0.7
+AMT_INCOME_TOTAL	-0.0999999999999999
+AMT_CREDIT	0.2
+AMT_ANNUITY	0.2
+AMT_GOODS_PRICE	0.2
+REGION_POPULATION_RELATIVE	0.3
+CNT_FAM_MEMBERS	0.2
+REGION_RATING_CLIENT	1
+REGION_RATING_CLIENT_W_CITY	1
+EXT_SOURCE_1	0.9
+EXT_SOURCE_2	1.5
+EXT_SOURCE_3	1.2
+There are 13 columns that are identified for transformation as per the Box Cox
+
+preProcValues <- preProcess(dt1, method = "BoxCox")
+preProcValues
+## Created from 10746 samples and 29 variables
+## 
+## Pre-processing:
+##   - Box-Cox transformation (13)
+##   - ignored (16)
+## 
+## Lambda estimates for Box-Cox transformation:
+##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+## -0.1000  0.2000  0.6000  0.6077  1.0000  1.5000
+dt1_tran <- predict(preProcValues, dt1)
+
+#Recreate numeric list with new dt1_tran
+numeric_list <- unlist(lapply(dt1_tran, is.numeric))
+dt1_num <- setDT(dt1_tran)[,..numeric_list]
+An example below of the one of the columns that have been transformed and visualized
+
+col_trans <- lambda_df[!is.na(lambda)]$Column
+i = 5
+x <- list(
+  title = as.character(col_trans[i])
+)
+p1 <- plot_ly(x = ~setDT(dt1)[,get(as.character(col_trans[i]))], type = "histogram", autobinx = FALSE) %>% layout(showlegend = FALSE) 
+p2 <- plot_ly(x = ~setDT(dt1_tran)[,get(as.character(col_trans[i]))], type = "histogram", autobinx = FALSE) %>% layout(showlegend = FALSE)
+subplot(p1,p2)
+100k
+200k
+0
+1000
+2000
+3000
+4000
+5000
+6000
+7000
+20
+30
+40
+50
+0
+1000
+2000
+3000
+4000
+5000
+6000
+7000
+Transformed Predictors (Variables)
+Looking at the before and after distribution for all the transformed variables
+
+Without Transformation
+After Transformation
+doPlots(as.data.frame(dt1)[, (colnames(dt1) %in% as.character(col_trans))], plotHist, ii = 1:length(col_trans))
+
+
+Transformation to resolve Outliers
+Outlier is defined as samples that are exceptionally far from the mainstream of the data. When one or more samples are identified as outliers then it is important to make sure that the values are scientifically valid. Several predictor models like Tree-based and SVMs are resistant to outliers.
+
+If a model is considered to be sensitive to outliers, then a spatial data transformation is used (it is important to scale it before doing the transformation)
+
+I will not be using the spatial data transformation since I have not read on it in detail and the book does not dive too much into it either
+
+Handling Missing Values
+It is important to understand why the values are missing. The values could be missing because they are structurally missing. It is important to know if the missing value is related to the outcome. Missing value should not be confused with censored data where the exact value is missing but something is known about its value.
+
+There are two approaches used to handle missing values
+
+First one uses the tree-based model can specifically account for the missing data. (I have never seen this approach being used in real life but that is just my experience)
+The second one is to impute the missing values.
+If the number of predictors with missing values are small, then EDA is the best option. If a variable with a high missing value is highly correlated with another variable that has few missing values then a model can be created to impute those missing values
+
+One popular technique is the K-nearest neighbour model. The advantage is that the imputed values are confined to be within the range of the training set values. The disadvantage is that the entire training set has to be used to impute on missing value variable.
+
+Another technique used is linear regression between the predictor which is highly correlated and one with missing values. *(I am not sure why the author mentions using linear regression with predictor which is highly correlated and one with missing values since highly correlated predictors are removed anyways)
+
+In some cases, the percentage of missing data is substantial enough to remove this predictor from subsequent modelling activities
+
+From my personal experience, I have never seen KNN model being used
+Linear regression model being used for imputing missing values does not make sense to me if one is just adding another highly correlated variable
+(https://www.kaggle.com/c/home-credit-default-risk/discussion/58391)
+
+Finding the % of missing values for all columns
+
+mv <- as.data.frame(apply(dt1_tran, 2, function(col)sum(is.na(col))/length(col)))
+colnames(mv)[1] <- "missing_values"
+mv <- index_to_col(mv,'Column')
+mv <- setDT(mv)[order (missing_values, decreasing = TRUE)]
+
+ggplot (mv[1:40,], aes (reorder(Column, missing_values), missing_values)) + geom_bar (position = position_dodge(), stat = "identity") + coord_flip () + xlab('Columns') + ylab('Missing Value %')
+
+
+In this dataset, I would be using the imputation technique. Using the means to impute the missing values as a quick fix. I will be looking into this further to remove any columns with missing values greater than 60% and using methods suggested in the kaggle discussion section
+
+dt1_num2 <- na.aggregate(dt1_num)
+Data Reduction and Feature Extraction
+PCA is a commonly used data reduction technique. This method seeks to find the linear combination of the predictors known as (PCs). The PC is defined as the linear combination of the predictors that captures the most variability of all possible linear combinations. The coefficients help us understand the component weights and which predictors are most important to each PCs
+
+Before running a PCA analysis, it is best to first transform the skewed predictors and then center and scale. The PCA analysis is an unsupervised learning technique and does not consider the modelling objective or response variable when summarizing variability.
+
+regexp <- "[[:digit:]]+"
+pcaObject <- prcomp(dt1_num2,  scale = TRUE, center = TRUE)
+eig_tb <- cbind(Dimensions = rownames(get_eig(pcaObject)), get_eig(pcaObject))
+ts <- setDT(eig_tb)[cumulative.variance.percent > 80][1,1]
+ts <- str_extract(as.character(ts[[1]]), regexp)
+
+n <- as.numeric(ts)
+col_list <- list()
+for (i in 1:n){ 
+ col_list[i]<-paste('rotation.PC',i, sep="") 
+} 
+
+pca_df <- as.data.frame(pcaObject[2])
+pca_df <- pca_df[,colnames(pca_df) %in% col_list]
+pca_df <- cbind(Features = rownames(pca_df), pca_df)
+pca_df <- setDT(pca_df)[order (rotation.PC1, decreasing = TRUE)]
+The number of PCA before 80% of the variance is captured is 42
+
+The scree plot is used to determine the number of components and the variability
+
+fviz_eig(pcaObject)
+
+
+In a classification problem, the PCA can be used to show potential seperation of classes Overlapping classes does not mean that other models, especially ones that can accomodate non linear relationship will reach the same conclusion
+
+PCA can also be used to check if there are any blatant outliers
+
+Removing Predictors
+There are 3 advantages of removing variables
+1) Decrease in computational time and complexity
+2) Removing highly correlated variables with same underlying information
+3) Removing predictors with degenerate distributions
+
+Zero Variance Predictors
+Removing variables with zero variance. Tree-based models are impervious to zero variance predictors but others like linear regression are not.
+
+nzv <- nearZeroVar(dt1,saveMetrics= TRUE)
+nzv <- index_to_col(nzv,"Column")
+nzv_tb <- setDT(nzv)[nzv == TRUE | zeroVar ==TRUE]
+nzv_tb[sample(1:nrow(nzv_tb), size = nrow(nzv_tb)),] %>% 
+  datatable(filter = 'top', options = list(
+    pageLength = 15, autoWidth = T
+  ))
+Show 
+15
+ entriesSearch:
+Column	freqRatio	percentUnique	zeroVar	nzv
+All
+All
+All
+All
+All
+1	BASEMENTAREA_AVG	58.7450199203187	1.22922432043081	false	true
+2	NONLIVINGAREA_AVG	107.57326007326	1.06988042704163	false	true
+3	LANDAREA_AVG	82.5396825396825	1.14695084078293	false	true
+4	FLAG_DOCUMENT_13	282.681734317343	0.000650383238323182	false	true
+5	REG_REGION_NOT_LIVE_REGION	65.0319948464677	0.000650383238323182	false	true
+6	FLAG_DOCUMENT_9	255.686978297162	0.000650383238323182	false	true
+7	FLAG_DOCUMENT_16	99.7242056993122	0.000650383238323182	false	true
+8	FLAG_DOCUMENT_15	825.64247311828	0.000650383238323182	false	true
+9	FLAG_DOCUMENT_5	65.1598537005164	0.000650383238323182	false	true
+10	FLAG_DOCUMENT_14	339.543743078627	0.000650383238323182	false	true
+11	AMT_REQ_CREDIT_BUREAU_WEEK	31.3664717348928	0.00292672457245432	false	true
+12	AMT_REQ_CREDIT_BUREAU_HOUR	169.465384615385	0.00162595809580795	false	true
+13	FLAG_MOBIL	307510	0.000650383238323182	false	true
+14	NONLIVINGAREA_MODE	140.72536687631	1.08191251695061	false	true
+15	FLAG_CONT_MOBILE	534.733449477352	0.000650383238323182	false	true
+Showing 1 to 15 of 33 entriesPrevious123Next
+#Saving columns with nzv
+rm_col_nzv <- as.character(setDT(nzv)[nzv == TRUE | zeroVar ==TRUE]$Column)
+There are 33 columns that have been identified with near zero variance
+
+Between Predictor-Correlations
+Collinearity is the technical term for the situation where a pair of predictor variables have a substantial correlation with each other. It is also possible to find relationships between multiple predictors at once (called multi-collinearity)
+
+When the dataset consists of too many predictors to examine visually techniques such as PCA can be used to characterize the magnitude of the problem.
+
+Reasons to avoid highly correlated data
+
+Redundant predictors frequently add more complexity to the model than information they provide to the model
+Results in unstable model, numerical errors and degraded predictive performance
+
+
+Visually on a quick glance, we can see that there is a portion of predictors that are highly correlated (the big blue box in the middle)
+
+df_corr = cor(dt1_num2, use = "pairwise.complete.obs")
+hc = findCorrelation(df_corr, cutoff=0.80)
+hc = sort(hc)
+dt1_num3 = as.data.frame(dt1_num2)[,-c(hc)]
+
+rm_col_hc <- setdiff(colnames(dt1_num2),colnames(dt1_num3))
+rm_col_hc
+##  [1] "AMT_ANNUITY"                  "AMT_GOODS_PRICE"             
+##  [3] "REGION_RATING_CLIENT_W_CITY"  "REG_REGION_NOT_WORK_REGION"  
+##  [5] "REG_CITY_NOT_WORK_CITY"       "APARTMENTS_AVG"              
+##  [7] "BASEMENTAREA_AVG"             "YEARS_BEGINEXPLUATATION_AVG" 
+##  [9] "YEARS_BUILD_AVG"              "COMMONAREA_AVG"              
+## [11] "ELEVATORS_AVG"                "ENTRANCES_AVG"               
+## [13] "FLOORSMAX_AVG"                "FLOORSMIN_AVG"               
+## [15] "LANDAREA_AVG"                 "LIVINGAPARTMENTS_AVG"        
+## [17] "LIVINGAREA_AVG"               "NONLIVINGAPARTMENTS_AVG"     
+## [19] "NONLIVINGAREA_AVG"            "APARTMENTS_MODE"             
+## [21] "YEARS_BUILD_MODE"             "LIVINGAREA_MODE"             
+## [23] "APARTMENTS_MEDI"              "BASEMENTAREA_MEDI"           
+## [25] "YEARS_BEGINEXPLUATATION_MEDI" "COMMONAREA_MEDI"             
+## [27] "ELEVATORS_MEDI"               "ENTRANCES_MEDI"              
+## [29] "FLOORSMAX_MEDI"               "FLOORSMIN_MEDI"              
+## [31] "LANDAREA_MEDI"                "LIVINGAPARTMENTS_MEDI"       
+## [33] "LIVINGAREA_MEDI"              "NONLIVINGAPARTMENTS_MEDI"    
+## [35] "NONLIVINGAREA_MEDI"           "TOTALAREA_MODE"              
+## [37] "OBS_30_CNT_SOCIAL_CIRCLE"     "DEF_30_CNT_SOCIAL_CIRCLE"
+There are 38 columns that have been identified with high correlation with a cutoff set at 0.80
+
+Below is the table showing the variables that have a correlation abs > 0.8
+
+#Highly correlated vairables table format
+df_corr2 <- df_corr %>%
+  as.data.frame() %>%
+  mutate(var1 = rownames(.)) %>%
+  gather(var2, value, -var1) %>%
+  arrange(desc(value)) %>%
+  group_by(value)
+
+corr_tb <- setDT(df_corr2)[abs(value) > 0.8 & var1 != var2 & var1 != "Ttl_Rating"  & var2 != "Ttl_Rating"]
+corr_tb <- corr_tb[!duplicated(corr_tb$value),]
+
+l1 <- corr_tb$var1
+l2 <- corr_tb$var2
+
+corr_tb[sample(1:nrow(corr_tb), size = nrow(corr_tb)),] %>% 
+  datatable(filter = 'top', options = list(
+    pageLength = 15, autoWidth = T
+  ))
+Show 
+15
+ entriesSearch:
+var1	var2	value
+All
+All
+All
+1	LIVINGAREA_MODE	APARTMENTS_AVG	0.868732032822375
+2	LIVINGAPARTMENTS_MEDI	LIVINGAPARTMENTS_MODE	0.975605303599329
+3	FLOORSMIN_MEDI	FLOORSMIN_AVG	0.997240985018045
+4	APARTMENTS_MEDI	LIVINGAREA_AVG	0.88748355132083
+5	LIVINGAREA_MEDI	LIVINGAREA_MODE	0.974743375079148
+6	APARTMENTS_MEDI	APARTMENTS_MODE	0.977193058691277
+7	LIVINGAREA_MEDI	APARTMENTS_AVG	0.887324130902251
+8	OBS_60_CNT_SOCIAL_CIRCLE	OBS_30_CNT_SOCIAL_CIRCLE	0.998489542510993
+9	NONLIVINGAPARTMENTS_MODE	NONLIVINGAPARTMENTS_AVG	0.969369828534325
+10	TOTALAREA_MODE	APARTMENTS_MODE	0.846843475196669
+11	APARTMENTS_MODE	LIVINGAREA_AVG	0.866185841334117
+12	YEARS_BEGINEXPLUATATION_MEDI	YEARS_BEGINEXPLUATATION_MODE	0.96353869838412
+13	LIVINGAREA_MEDI	ELEVATORS_AVG	0.83634541385081
+14	LIVINGAREA_MODE	ELEVATORS_AVG	0.811056199040482
+15	AMT_ANNUITY	AMT_CREDIT	0.835274763599521
+Showing 1 to 15 of 83 entriesPrevious123456Next
+Scatter Plots (Highly Correlated Variables)
+Lets see the scatter plot of all 83 numeric columns in the data
+
+As an example, I have limited the scatter plots to make the code run faster
+
+Scatter1
+Scatter2
+Scatter3
+Scatter4
+doPlotsCorr(dt1_num2,plotCorr,l1,l2,1:6)
+
+
+Transformed Predictors (Variables)
+Now that all the pre processing for numeric variables is done, lets have a look at the density plot to compare the target variable
+
+Density Plot 1
+Density Plot 2
+doPlots(dt1_num2, plotDen, ii = 1:20)
+
+
+Adding Predictors
+When a predictor is categorical then it is common to decompose the predictor into a set of more specific variables. The dummy variables are always n-1 with n being the levels of the variable. The decision to include all the variables depends on the type of model we would be using. If a model that is sensitive to that type of information is being used, such as linear regression, then it is important to use n-1. Otherwise, using n (complete set of dummy variables) would help improve interpretation of the model
+
+Dummy variables are also called “One Hot Encoding”. It is important to note that there are several ways of apporaching dummy variables depending on the type of categorical feature i.e. whether it is ordinal or not. An example of an ordinal but a categorical feature would be size of a shirt (XS, S, M, L, XL). In that case, the feature should be changed to an integer (XS =1, S=2 etc.). An example of NOT an ordinal but a categorical feature would be sex (M, F). In that case, the feature should be “One Hot Encoded”
+
+Before changing the categorical variables to a dummy variable, lets look at how the relationship is with the Target variable using Box Plots
+
+BarPlot of the Categorical and Target Variable
+Now that all the pre processing for numeric variables is done, lets have a look at the density plot to compare the target variable
+
+The number of categorical columns are 16 in the data
+
+BarPlot 1
+BarPlot 2
+BarPlot 3
+doPlots(dt1_non_num, plotBar, ii = 1:9)
+
+
+Binning Predictors
+One approach to simplify a dataset is to take a numeric predictor and pre-categorize or “bin” it into two or more groups prior to data analysis.
+
+Issues with manual binning
+1) Significant loss of information and performance in the model
+2) Loss of prediction in the predictions when the predictors are categorized
+3) Can lead to high rate of false positives
+
+I will not be using binning predictors in this analysis
+
+Attaching numeric and non numeric columns
+
+dt1_preproc <- cbind(dt1_non_num_dum,dt1_num)
+
+mv <- as.data.frame(apply(dt1_preproc, 2, function(col)sum(is.na(col))/length(col)))
+colnames(mv)[1] <- "missing_values"
+mv <- index_to_col(mv,'Column')
+mv <- setDT(mv)[order (missing_values, decreasing = TRUE)]
+
+ggplot (mv[1:40,], aes (reorder(Column, missing_values), missing_values)) + geom_bar (position = position_dodge(), stat = "identity") + coord_flip () + xlab('Columns') + ylab('Missing Value %')
+
+
+dt1_preproc <- na.aggregate(dt1_preproc)
+There are some categorical values which after doing the one hot encoding have missing values. For the sake of ease, I will be using the mean of the column to fill in the NA values
+
+Chapter 4: Over-Fitting and Model Tuning
+Overfitting and its Problems
+Overfitting refers to a model that models the training data too well.
+
+Overfitting happens when a model learns the detail and noise in the training data to the extent that it negatively impacts the performance of the model on new data. This means that the noise or random fluctuations in the training data is picked up and learned as concepts by the model. The problem is that these concepts do not apply to new data and negatively impact the models ability to generalize.
+
+Overfitting is more likely with nonparametric and nonlinear models that have more flexibility when learning a target function. As such, many nonparametric machine learning algorithms also include parameters or techniques to limit and constrain how much detail the model learns.
+
+We must use the existing data to identify settings for the models parameters that yield the best and most realistic predictive performance (known as model tuning)
+
+This has been achieved by splitting the existing data into training and test sets
+
+In addition to learning the general patterns in the data, the model has also learned the characteristics of each samples unique noise. This type of model is said to be overfit and will usually have a poor accuracy when predicting a new sample. An example is provided below
+
+Model Tuning
+Many models have tuning parameters which cannot be directly estimated from the data. Since many of these parameters control the complexity of the model, poor choices for the values can result in overfitting
+
+For example lets discuss on the cost parameter. When the cost is large, the model will go to great lengths to correctly label every point while smaller values will produce a model that are not as aggressive
+
+Data Splitting
+Data Splitting usually entails a training, validation and test set
+
+The “training” data is the general term for the samples used to create the model while the test or validation data is set used to qualify performance
+
+When number of samples are not large, a strong case can be made that a test set should be avoided because every sample may be needed for modelling
+
+There is always a desire to make the test and training set as homogeneous as possible
+
+The simplest way to split the data into a training and test set is to take a random sample
+
+When one class has a disproportionally small frequency compared to the others, there is a chance that the distribution of the outcomes may be substantially different between the training and test sets. To account for the outcome stratified random sampling applies random sampling within subgroups. The data can also be split on the basis of the predictor values based on maximum dissimilarity sampling
+
+Going forward I will be using a small sample since the dataset is too big for processing
+
+Using the Recursive Feature Elimination method to select the variables in order to decrease computational time going forward.
+
+# control <- rfeControl(functions=rfFuncs, method="cv", number=3)
+# trainctrl <- trainControl(classProbs= TRUE, summaryFunction = twoClassSummary)
+# 
+# results <- rfe(as.data.frame(dt1_preproc_sample)[,-c(153)], 
+#                as.data.frame(dt1_preproc_sample)[,c(153)], sizes=c(1:100), 
+#                rfeControl=control, 
+#                method="rf",
+#                metric = "AUC", 
+#                trControl = trainctrl)
+# print(results)
+# predictors(results)
+# plot(results, type=c("g", "o"))
+#boruta.train <- Boruta(TARGET~., data = dt1_preproc, doTrace = 2)
+#print(boruta.train)
+Selecting the columns that have low RMSE
+
+[3] “CODE_GENDERM” “FLAG_OWN_CARN”
+[5] “ORGANIZATION_TYPEIndustry: type 1” “DAYS_BIRTH”
+[7] “DAYS_ID_PUBLISH” “SK_ID_CURR”
+[9] “REG_CITY_NOT_LIVE_CITY” “EXT_SOURCE_1”
+[11] “EXT_SOURCE_2” “EXT_SOURCE_3”
+[13] “YEARS_BEGINEXPLUATATION_MODE” “COMMONAREA_MODE”
+[15] “FLOORSMAX_MODE” “LIVINGAPARTMENTS_MODE”
+[17] “YEARS_BUILD_MEDI”
+
+#cols_to_keep <- c(predictors(results),"TARGET")
+cols_to_keep <- c('FLAG_OWN_CARN','`ORGANIZATION_TYPEIndustry: type 1`','DAYS_ID_PUBLISH','SK_ID_CURR','REG_CITY_NOT_LIVE_CITY','YEARS_BEGINEXPLUATATION_MODE','COMMONAREA_MODE','FLOORSMAX_MODE','LIVINGAPARTMENTS_MODE','YEARS_BUILD_MEDI','CODE_GENDERM','OCCUPATION_TYPEWaiters/barmen staff','TARGET','EXT_SOURCE_1','EXT_SOURCE_2','EXT_SOURCE_3')
+dt1_preproc_sample <- as.data.frame(dt1_preproc_sample)[, (colnames(dt1_preproc_sample) %in% cols_to_keep)]
+Creating a Data Partition for Training and Testing
+
+Resampling Techniques
+K-Fold Cross-Validation
+The samples are randomly partitioned into k sets of roughly equal size. A model is fit using the all samples except the first subset (called the first fold). The held-out samples are predicted by this model and used to estimate performance measures. The first subset is returned to the training set and procedure repeats with the second subset hold out and so on. The k sampling estimates of performance are summarized and used to understand the relationship between the tuning parameter and model utility.
+
+A slight variant is to select the k partitions in a way that makes the folds balanced with respect to the outcome (Stratified random sampling)
+
+Another version, leave-one-out cross-validation (LOOCV) is the special case where k is the number of samples
+
+The choice of k is between 5 and 10 but there is no formal rule.
+
+K-Fold generally has a larger variance as compared to other medhots and for that reason might not be attractive. However, with large training sets the potential issues with variance and bias become negligible. Larger values of k are also more computationally burdensome.
+
+Following shows a visual explaination of k-fold
+
+
+cvSplits <- createFolds(trainclasses, k = 10, returnTrain = TRUE)
+Repeated Training Test Splits
+Also knows as the “leave-group-out cross validation”, the technique simply creates multiple splits of the data into modelling and prediction sets. The number of repetitions is important. Increasing the number of subsets has the effect of decreasing the uncertianity of the performance estimates. To get stable estimates of performance, it is suggested to choose a large number of repetitions (say 50-200)
+
+repeatedSplits <- createDataPartition(trainclasses, p =0.8, times = 3)
+The Bootstrap
+A bootstrap sample is a random sample of the data taken with replacement. This means that after a data point is selected for the subset, it is still available for further selection. In general, bootstrap methods have less uncertainity than k-fold cross-validation
+
+bsSplits <- createResample(trainclasses, times = 10, list = TRUE)
+Data Splitting Recommendations
+If the sample size is small, we recommend repeated 10-fold cross-validation for several reasion: The bias and variance properties are good and given the sample size the computational costs are not large
+
+If the goal is to choose between models as opposed to getting the best indicator of performance, a strong case can be made for using one of the bootstrap procedures since these have very low variance
+
+For large sample sizes, the differences between resampling methods become less pronounced and computational efficiency increases in importance. Here simple 10-fold cross-validation should provide acceptable variance, low bias and is relatively quick to compare
+
+Choosing Between Models
+Start with several models that are the least interpretable and most flexible
+Investigate the simple models that are less opaque (are not complete black boxes)
+Consider using the simplest model that reasonably approximates the performance of the more complex model
+The modeller can then discover the “performance ceiling”
+
+Running a Simple model
+dt1_preproc_sample <- mutate(dt1_preproc_sample, TARGET = ifelse(TARGET == 0,'Yes',"No"))
+dt1_preproc_sample$TARGET <- as.factor(dt1_preproc_sample$TARGET)
+
+inTrain <- createDataPartition(dt1_preproc_sample$TARGET, p = .8)[[1]]
+dtTrain <- dt1_preproc_sample[ inTrain, ]
+dtTest  <- dt1_preproc_sample[-inTrain, ]
+traincntrl <- trainControl(method = 'repeatedcv',
+                                         number = 5,
+                                         repeats = 2,
+                                         classProbs = TRUE, 
+                                         sampling = "down",
+                                         summaryFunction = twoClassSummary)
+Running a KNN model
+
+trainPredictors <- as.matrix(trainPredictors)
+
+knnFit <- train(TARGET ~.,
+                data = dtTrain,
+                method = "knn",
+                preProc = c("center", "scale"),
+                tuneGrid = data.frame(.k = 3:6),
+                trControl = traincntrl)
+knnFit$results
+##   k       ROC      Sens      Spec      ROCSD     SensSD     SpecSD
+## 1 3 0.6464795 0.5906208 0.6331632 0.04451443 0.09334371 0.04233739
+## 2 4 0.6599800 0.6194332 0.6258789 0.04751774 0.11352800 0.05023109
+## 3 5 0.6822552 0.6501350 0.6417296 0.05648607 0.10528346 0.03995498
+## 4 6 0.6834926 0.6478408 0.6355861 0.04585629 0.07986223 0.03669572
+Running a SVM model
+
+svmFit <- train(TARGET ~.,
+                data = dtTrain,
+                method = 'svmRadial',
+                preProc = c('center','scale'),
+                tuneLength = 7,
+                trControl = traincntrl)
+
+svmFit
+## Support Vector Machines with Radial Basis Function Kernel 
+## 
+## 2461 samples
+##   14 predictor
+##    2 classes: 'No', 'Yes' 
+## 
+## Pre-processing: centered (14), scaled (14) 
+## Resampling: Cross-Validated (5 fold, repeated 2 times) 
+## Summary of sample sizes: 1969, 1969, 1968, 1970, 1968, 1968, ... 
+## Addtional sampling using down-sampling prior to pre-processing
+## 
+## Resampling results across tuning parameters:
+## 
+##   C      ROC        Sens       Spec     
+##    0.25  0.7382625  0.6890688  0.6563070
+##    0.50  0.7441873  0.6914980  0.6737292
+##    1.00  0.7431345  0.7096491  0.6609447
+##    2.00  0.7237982  0.6342105  0.6622682
+##    4.00  0.7057963  0.6268556  0.6569677
+##    8.00  0.6860843  0.6425101  0.6373380
+##   16.00  0.6936429  0.6679487  0.6066848
+## 
+## Tuning parameter 'sigma' was held constant at a value of 0.07495102
+## ROC was used to select the optimal model using the largest value.
+## The final values used for the model were sigma = 0.07495102 and C = 0.5.
+plot(svmFit, scales = list(x=list(log =2)))
+
+
+predictClasses <- predict(svmFit, dtTest)
+predictProbs <- predict(svmFit, newdata = dtTest, type = "prob")
+# svmFit$results %>%
+#   mutate(accuracySD_low = Accuracy - 2*(AccuracySD/sqrt(svmFit$control$number * svmFit$control$repeats)),
+#          accuracySD_high = Accuracy + 2*(AccuracySD/sqrt(svmFit$control$number * svmFit$control$repeats))) %>%
+#   ggplot(aes(x = C)) +
+#   geom_line(aes(y = Accuracy)) +
+#   geom_point(aes(y = Accuracy)) + theme_classic() +
+#   scale_x_log10() + #correct spacing of the cost parameter
+#   ylim(0.50, 0.70) + #set correct y-axis
+#   geom_errorbar(aes(ymin=accuracySD_low, ymax=accuracySD_high), 
+#                 colour="gray50",
+#                 width=.1) +
+#   labs(title="Estimates of prediction accuracy\nwith 2 SD errror bars")
+#  
+Comparing SVM, Logistic Regression and KNN
+
+logisticReg <- train(TARGET ~.,
+                     data = dtTrain,
+                     method = 'glm',
+                     trControl = traincntrl)
+resamp <- resamples(list(SVM = svmFit, Logistic = logisticReg, KNN = knnFit))
+summary(resamp)
+## 
+## Call:
+## summary.resamples(object = resamp)
+## 
+## Models: SVM, Logistic, KNN 
+## Number of resamples: 10 
+## 
+## ROC 
+##               Min.   1st Qu.    Median      Mean   3rd Qu.      Max. NA's
+## SVM      0.6574881 0.7406957 0.7462843 0.7441873 0.7535607 0.7992771    0
+## Logistic 0.6548158 0.7172006 0.7432935 0.7418204 0.7659268 0.8229414    0
+## KNN      0.6221018 0.6487550 0.6813883 0.6834926 0.7160073 0.7614479    0
+## 
+## Sens 
+##               Min.   1st Qu.    Median      Mean   3rd Qu.      Max. NA's
+## SVM      0.5000000 0.6518219 0.7273954 0.6914980 0.7435897 0.7692308    0
+## Logistic 0.5000000 0.6142038 0.6626181 0.6809717 0.7692308 0.8205128    0
+## KNN      0.5263158 0.6153846 0.6491228 0.6478408 0.6923077 0.7894737    0
+## 
+## Spec 
+##               Min.   1st Qu.    Median      Mean   3rd Qu.      Max. NA's
+## SVM      0.6365639 0.6456954 0.6674009 0.6737292 0.7065780 0.7174393    0
+## Logistic 0.6181015 0.6876380 0.7004405 0.6878213 0.7026432 0.7312775    0
+## KNN      0.5506608 0.6264478 0.6423841 0.6355861 0.6523385 0.6828194    0
+Chapter 5: Measuring Performance in Regression Models
+When the outcome is a number, the most common method for characterizing a model’s predictive capabilities is to use the root mean squared error (RMSE).
+
+The mean squared error (MSE) is calculated by squaring the residuals and summing them. The RMSE is then calculated by taking the square root of the MSE so that it is in the same units as the original data.
+
+Another common metric is the coefficient of determination, commonly written as R2. An R2 value of 0.75 implies that the model can explain three-quarters of the variation in the outcome. R2 is a measure of correlation and not accuracy.
+
+One might view a model with a 90% R2 positively, but the RMSE may be in the tens of thousands of dollars-poor predictive accuracy for anyone selling a moderately priced property.
+
+Variance-Bias Trade off
+Complex models have very high variance which leads to overfitting while simple models have very high bias which leads to underfitting
+
+Chapter 7: Nonlinear Regression Models
+Support Vector Machines (SVM)
+The chapter will focus on e-insensitive regression.
+
+SVMs for regression use a function similar to the Huber function, with an important difference. Given a threshold set by the user (denoted as e), data points with residuals within the threshold do not contribute to the regression fit while data points with an absolute difference greater than the threshold contribute a linear-scale amount.
+
+There are several consequences to this approach:
+
+Since the squared residuals are not used, large outliers have a limited effect on the regression equation.
+Samples that the model fits well (i.e., the residuals are small) have no effect on the regression equation. In fact, if the threshold is set to a relatively large value, then the outliers are the only points that define the regression line
+Parameters in SVM:
+The book mentions that there are 4 types of kernels which can be changed as stated below:
+
+Linear
+Radial
+Polynomial
+Hyperbolic tangent
+Which kernel function should be used? This depends on the problem. The radial basis function has been shown to be very effective. However, when the regression line is truly linear, the linear kernel function will be a better choice.
+
+Note that some of the kernel functions have extra parameters. For example, the polynomial degree in the polynomial kernel must be specified. Similarly, the radial basis function has a parameter (??) that controls the scale. These parameters, along with the cost value, constitute the tuning parameters for the model.
+
+The cost parameter is the main tool for adjusting the complexity of the model. When the cost is large, the model becomes very flexible since the effect of errors is amplified. When the cost is small, the model will “stiffen” and become less likely to over-fit (but more likely to underfit) because the contribution of the squared parameters is proportionally large in the modified error function. The tuneLength parameter changes the cost parameter in SVM.
+
+SVM also has a gamma parameter which can be used. Technically speaking, large gamma leads to high bias and low variance models, and vice-versa.
+
+svmFitRadial <- svmFit
+
+svmFitLinear <- train(TARGET ~.,
+                data = dtTrain,
+                method = 'svmLinear',
+                preProc = c('center','scale'),
+                metric = "ROC",
+                tuneLength = 7,
+                trControl = traincntrl)
+
+
+# svmFitPoly <- train(TARGET ~.,
+#                 data = dtTrain,
+#                 method = 'svmPoly',
+#                 preProc = c('center','scale'),
+#                 tuneLength = 7,
+#                 trControl = traincntrl)
+Sometimes the svmPoly would show a maximum number of iterations message. To read further on it, please go on the link below
+
+https://stats.stackexchange.com/questions/37669/libsvm-reaching-max-number-of-iterations-warning-and-cross-validation
+
+Comparing all the SVM models
+
+resamp <- resamples(list(SVM_Radial = svmFit, SVM_Linear = svmFitLinear))
+summary(resamp)
+## 
+## Call:
+## summary.resamples(object = resamp)
+## 
+## Models: SVM_Radial, SVM_Linear 
+## Number of resamples: 10 
+## 
+## ROC 
+##                 Min.   1st Qu.    Median      Mean   3rd Qu.      Max.
+## SVM_Radial 0.6574881 0.7406957 0.7462843 0.7441873 0.7535607 0.7992771
+## SVM_Linear 0.6808412 0.7199278 0.7330936 0.7379262 0.7450671 0.8435501
+##            NA's
+## SVM_Radial    0
+## SVM_Linear    0
+## 
+## Sens 
+##                 Min.   1st Qu.    Median      Mean   3rd Qu.      Max.
+## SVM_Radial 0.5000000 0.6518219 0.7273954 0.6914980 0.7435897 0.7692308
+## SVM_Linear 0.5789474 0.6194332 0.6666667 0.6653846 0.6902834 0.8205128
+##            NA's
+## SVM_Radial    0
+## SVM_Linear    0
+## 
+## Spec 
+##                 Min.   1st Qu.    Median      Mean  3rd Qu.      Max. NA's
+## SVM_Radial 0.6365639 0.6456954 0.6674009 0.6737292 0.706578 0.7174393    0
+## SVM_Linear 0.6578366 0.6867068 0.6945984 0.7008324 0.715859 0.7466960    0
+K-Nearest Neighbors (KNN)
+The KNN approach simply predicts a new sample using the K-closest samples from the training set. The basic KNN method as described above depends on how the user defines distance between samples. Euclidean distance.
+
+It is easy to see that when q = 2, then Minkowski distance is the same as Euclidean distance. When q = 1, then Minkowski distance is equivalent to Manhattan (or city-block) distance, which is a common metric used for samples with binary predictors.
+
+Following shows the formulae for the different type of distance meansures
+
+
+Because the KNN method fundamentally depends on distance between samples, the scale of the predictors can have a dramatic influence on the distances among samples. To avoid this potential bias and to enable each predictor to contribute equally to the distance calculation, we recommend that all predictors be centered and scaled prior to performing KNN.
+
+Upon pre-processing the data and selecting the distance metric, the next step is to find the optimal number of neighbors. Like tuning parameters from other models, K can be determined by resampling.
+s Two commonly noted problems are computational time and the disconnect between local structure and the predictive ability of KNN.
+
+knnFit <- train(TARGET ~.,
+                data = dtTrain,
+                method = "knn",
+                preProc = c("center", "scale"),
+                metric = "ROC",
+                tuneGrid = data.frame(.k = 1:20),
+                trControl = traincntrl)
+
+knnFit$results
+##     k       ROC      Sens      Spec      ROCSD     SensSD      SpecSD
+## 1   1 0.5858133 0.5647099 0.6069167 0.03556975 0.08354937 0.020336660
+## 2   2 0.6179032 0.5495951 0.6106733 0.05596709 0.11010086 0.022579510
+## 3   3 0.6525995 0.6216599 0.6190434 0.05693701 0.08277839 0.025944815
+## 4   4 0.6405076 0.5724022 0.6245641 0.04449656 0.08555885 0.032100892
+## 5   5 0.6678580 0.6010796 0.6452928 0.05145030 0.08801512 0.043584598
+## 6   6 0.6804973 0.6296221 0.6378018 0.04545924 0.08156704 0.030387787
+## 7   7 0.6987438 0.6682861 0.6466221 0.03640704 0.08221800 0.045841714
+## 8   8 0.6775168 0.6136977 0.6494705 0.02827562 0.04847797 0.009700795
+## 9   9 0.6714399 0.5855601 0.6446461 0.03457987 0.09192475 0.051250120
+## 10 10 0.7019167 0.6321188 0.6728540 0.03133454 0.05965954 0.038891918
+## 11 11 0.7034076 0.6375169 0.6589686 0.03676272 0.09128801 0.045307430
+## 12 12 0.6726753 0.5648448 0.6417680 0.03206650 0.07465994 0.040910626
+## 13 13 0.6968237 0.6321188 0.6644849 0.02962510 0.07235043 0.051077946
+## 14 14 0.6865993 0.5730769 0.6638241 0.02579517 0.08512493 0.046500728
+## 15 15 0.7030836 0.6297571 0.6657803 0.02328322 0.04525565 0.031676467
+## 16 16 0.6907879 0.5981107 0.6796788 0.04303987 0.10062718 0.051681073
+## 17 17 0.7044471 0.6112011 0.6662611 0.01681404 0.07916513 0.048757776
+## 18 18 0.7047261 0.6167341 0.6712820 0.02030403 0.06401767 0.034813325
+## 19 19 0.7117102 0.6217274 0.6929238 0.03470055 0.08658692 0.031400445
+## 20 20 0.7109069 0.6090418 0.6805769 0.02181171 0.07462046 0.054853747
+I will be skipping Chapter 8-10 since they cover regression models. This is a Classification problem so I will be starting from Chapter 11
+
+Chapter 11: Measuring Performance in Classification Models
+Class Predictions
+Classification models usually generate two types of predictions. Like regression models, classification models produce a continuous valued prediction, which is usually in the form of a probability
+
+Most classification models generate predicted class probabilities. However, when some models are used for classification, like neural networks and partial least squares, they produce continuous predictions that do not follow the definition of a probability-the predicted values are not necessarily between 0 and 1 and do not sum to 1
+
+For classification models like these, a transformation must be used to coerce the predictions into “probability-like” values so that they can be interpreted and used for classification. One such method is the softmax transformation
+
+https://medium.com/@uniqtech/understand-the-softmax-function-in-minutes-f3a59641e86d
+
+dtTest$svmFitLinearclass <- predict(svmFitLinear, dtTest)
+dtTest$svmFitLinearprobs <- predict(svmFitLinear, newdata = dtTest , type = "prob")
+
+dtTest$logclass <- predict(logisticReg, dtTest)
+dtTest$logprobs <- predict(logisticReg, newdata = dtTest , type = "prob")
+Well-Calibrated Probabilities
+
+One way to assess the quality of the class probabilities is using a calibration plot. For a given set of data, this plot shows some measure of the observed probability of an event versus the predicted class probability. If the points fall along a 45??? line, the model has produced well-calibrated probabilities
+
+calCurve <- calibration(TARGET ~ svmFitLinearprobs[,1] + logprobs[,1], data = dtTest)
+calCurve
+## 
+## Call:
+## calibration.formula(x = TARGET ~ svmFitLinearprobs[, 1] + logprobs[,
+##  1], data = dtTest)
+## 
+## Models: svmFitLinearprobs[, 1], logprobs[, 1] 
+## Event:  No 
+## Cuts: 11
+xyplot(calCurve, auto.key = list(columns = 2))
+
+
+Presenting Class Probabilities
+
+Visualizations of the class probabilities are an effective method of communicating model results.
+
+Example
+
+The top panel of figure below shows histograms of the test set probabilities for the logistic regression model (the panels indicate the true credit status). The probability of bad credit for the customers with good credit shows a skewed distribution where most customers’ probabilities are quite low. In contrast, the probabilities for the customers with bad credit are flat (or uniformly distributed), reflecting the model’s inability to distinguish bad credit cases
+
+Evaluating Predicted Classes
+A common method for describing the performance of a classification model is the confusion matrix.
+
+https://medium.com/greyatom/performance-metrics-for-classification-problems-in-machine-learning-part-i-b085d432082b
+
+The simplest metric is the overall accuracy rate (or, for pessimists, the error rate). This reflects the agreement between the observed and predicted classes and has the most straightforward interpretation
+
+However, there are a few disadvantages to using accuracy:
+
+Overall accuracy counts make no distinction about the type of errors being made
+One must consider the natural frequencies of each class (Class Imbalance)
+The Kappa statistic was originally designed to assess the agreement between two raters (Cohen 1960). Kappa takes into account the accuracy that would be generated simply by chance.
+
+http://www.statisticshowto.com/cohens-kappa-statistic/
+
+Depending on the context, Kappa values within 0.30 to 0.50 indicate reasonable agreement
+
+Two Class Problems
+
+The sensitivity of the model is the rate that the event of interest is predicted correctly for all samples having the event. The sensitivity is sometimes considered the true positive rate since it measures the accuracy in the event population. It is also known as Recall or True Positive.
+
+The specificity is defined as the rate that nonevent samples are predicted as nonevents. The false-positive rate is defined as one minus the specificity.
+
+Intuitively, increasing the sensitivity of a model is likely to incur a loss of specificity, since more samples are being predicted as events. Potential trade-offs between sensitivity and specificity may be appropriate when there are different penalties associated with each type of error.
+
+Following is the confusion matrix of the SVM polynomial model
+
+confusionMatrix(data = dtTest$svmFitLinearclass,
+ reference = dtTest$TARGET,
+ positive = "Yes")
+## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction  No Yes
+##        No   35 187
+##        Yes  13 379
+##                                           
+##                Accuracy : 0.6743          
+##                  95% CI : (0.6356, 0.7112)
+##     No Information Rate : 0.9218          
+##     P-Value [Acc > NIR] : 1               
+##                                           
+##                   Kappa : 0.15            
+##  Mcnemar's Test P-Value : <2e-16          
+##                                           
+##             Sensitivity : 0.6696          
+##             Specificity : 0.7292          
+##          Pos Pred Value : 0.9668          
+##          Neg Pred Value : 0.1577          
+##              Prevalence : 0.9218          
+##          Detection Rate : 0.6173          
+##    Detection Prevalence : 0.6384          
+##       Balanced Accuracy : 0.6994          
+##                                           
+##        'Positive' Class : Yes             
+## 
+Following is the confusion matrix of the Logistic Regression
+
+confusionMatrix(data = dtTest$logclass,
+ reference = dtTest$TARGET,
+ positive = "Yes")
+## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction  No Yes
+##        No   33 168
+##        Yes  15 398
+##                                           
+##                Accuracy : 0.702           
+##                  95% CI : (0.6641, 0.7379)
+##     No Information Rate : 0.9218          
+##     P-Value [Acc > NIR] : 1               
+##                                           
+##                   Kappa : 0.1589          
+##  Mcnemar's Test P-Value : <2e-16          
+##                                           
+##             Sensitivity : 0.7032          
+##             Specificity : 0.6875          
+##          Pos Pred Value : 0.9637          
+##          Neg Pred Value : 0.1642          
+##              Prevalence : 0.9218          
+##          Detection Rate : 0.6482          
+##    Detection Prevalence : 0.6726          
+##       Balanced Accuracy : 0.6953          
+##                                           
+##        'Positive' Class : Yes             
+## 
+Evaluating Class Probabilities
+The receiver operating characteristic (ROC) curve is one technique for evaluating this trade-off. The ROC curve is created by evaluating the class probabilities for the model across a continuum of thresholds. For each candidate threshold, the resulting true-positive rate (i.e., the sensitivity) and the false-positive rate (one minus the specificity) are plotted against each other.
+
+The optimal model should be shifted towards the upper left corner of the plot. Alternatively, the model with the largest area under the ROC curve would be the most effective.
+
+One advantage of using ROC curves to characterize models is that, since it is a function of sensitivity and specificity, the curve is insensitive to disparities in the class proportions.
+
+A disadvantage of using the area under the curve to evaluate models is that it obscures information
+
+library(pROC)
+
+rocCurve <- roc(response = dtTest$TARGET, predictor = dtTest$svmFitLinearprobs[,1], levels = rev(levels(dtTest$TARGET)))
+
+plot(rocCurve, legacy.axes = TRUE)
+
+
+auc(rocCurve)
+## Area under the curve: 0.7565
+Chapter 12.2: Logistic Regression
+Linear regression (Sect. 6.2) forms a model that is linear in the parameters, and these parameters are obtained by minimizing the sum of the squared residuals. It turns out that the model that minimizes the sum of the squared residuals also produces maximum likelihood estimates of the parameters when it is reasonable to assume that the model residuals follow a normal (i.e., Gaussian) distribution.
+
+https://towardsdatascience.com/the-logistic-regression-algorithm-75fe48e21cfa
+
+Also, this model produces linear class boundaries, unless the predictors used in the model are Once we find ?? values that appear to maximize the likelihood for our data, these values would be used to predict sample outcomes.
+
+ROC and AUC
+
+rocCurve <- roc(response = dtTest$TARGET, predictor = dtTest$logprobs[,1], levels = rev(levels(dtTest$TARGET)))
+
+plot(rocCurve, legacy.axes = TRUE)
+
+
+auc(rocCurve)
+## Area under the curve: 0.7411
+Chapter 14: Classification Trees and Rule-Based Models
+Classification trees fall within the family of tree-based models and, similar to regression trees, consist of nested if-then statements
+
+They can be highly interpretable, can handle many types of predictors as well as missing data, but suffer from model instability and may not produce optimal predictive performance
+
+The aim of classification trees is to partition the data into smaller, more homogeneous groups. A simple way to define purity in classification is by maximizing accuracy or equivalently by minimizing misclassification error.
+
+Two alternative measures, the Gini index (Breiman et al. 1984) and cross entropy, which is also referred to as deviance or information shift the focus from accuracy to purity.
+
+https://www.analyticsvidhya.com/blog/2016/04/complete-tutorial-tree-based-modeling-scratch-in-python/
+
+Variable importance can be computed for classification trees by assessing the overall improvement in the optimization criteria for each predictor
+
+Handling Categorical Variables
+
+For tree models, the splitting proceduremay be able to make more dynamic splits of the data, such as groups of two or more categories on either side of the split. However, to do this, the algorithm must treat the categorical predictors as an ordered set of bits. Therefore, when fitting trees and rule-based models, the practitioner must make a choice regarding the treatment of categorical predictor data:
+
+Each categorical predictor can be entered into the model as a single entity so that the model decides how to group or split the values. In the text, this will be referred to as using grouped categories
+
+Categorical predictors are first decomposed into binary dummy variables. In effect, splitting on a binary dummy variable prior to modeling imposes a “one-versus-all” split of the categories. This approach will be labelled as using independent categories.
+
+If a subset of the categories are highly predictive of the outcome, the first approach is probably best.
+
+However, this choice can have a significant effect on the complexity of the model (interpretability) and, as a consequence, the performance.
+
+Rule Based Models
+C4.5Rules
+
+For a rule, the model first calculates a baseline pessimistic error rate, then removes each condition in the rule in isolation. Once a condition is removed, the pessimistic error rate is recomputed. If any error rate is smaller than the baseline, the condition associated with the smallest error rate is removed. The process is repeated until all conditions are above the baseline rate or all conditions are removed.
+
+PART
+
+Here, a pruned C4.5 tree is created from the data and the path through the tree that covers the most samples is retained as a rule. The samples covered by the rule are discarded from the data set and the process is repeated until all samples are covered by at least one rule. Although the model uses trees to create the rules, each rule is created separately and has more potential freedom to adapt to the data.
+
+Bagged Trees
+
+In bagged trees, each model in the ensemble is used to predict the class of the new sample. Since each model has equal weight in the ensemble, each model can be thought of as casting a vote for the class it thinks the new sample belongs to. The total number of votes within each class are then divided by the total number of models in the ensemble (M) to produce a predicted probability vector for the sample. The new sample is then classified into the group that has the most votes, and therefore the highest probability.
+
+Random Forests
+
+As with bagging, each tree in the forest casts a vote for the classification of a new sample, and the proportion of votes in each class across the ensemble is the predicted probability vector. While the type of tree changes in the algorithm, the tuning parameter of number of randomly selected predictors to choose from at each split is the same (denoted as mtry). As in regression, the idea behind randomly sampling predictors during training is to de-correlate the trees in the forest
+
+AdaBoost
+
+AdaBoost generates a sequence of weak classifiers, where at each iteration the algorithm finds the best classifier based on the current sample weights. Samples that are incorrectly classified in the kth iteration receive more weight in the (k + 1)st iteration, while samples that are correctly classified receive less weight in the subsequent iteration. This means that samples that are difficult to classify receive increasingly larger weights until the algorithm identifies a model that correctly classifies these samples. Therefore, each iteration of the algorithm is required to learn a different aspect of the data, focusing on regions that contain difficult-to-classify samples. At each iteration, a stage weight is computed based on the error rate at that iteration. The nature of the stage weight described in Algorithm 14.2 implies that more accurate models have higher positive values and less accurate models have lower negative values.5 The overall sequence of weighted classifiers is then combined into an ensemble and has a strong potential to classify better than any of the individual classifiers.
+
+dtFitCART <- train(x= setDT(dtTrain)[,-c('TARGET')],
+                y= dtTrain$TARGET,
+                method = 'rpart',
+                preProc = c('center','scale'),
+                tuneLength = 7,
+                metric = "ROC",
+                trControl = traincntrl)
+
+# dtFitPART <- train(x= setDT(dtTrain)[,-c('TARGET')],
+#                   y= dtTrain$TARGET,
+#                   method = 'PART',
+#                   preProc = c('center','scale'),
+#                   tuneLength = 7,
+#                   metric = "ROC",
+#                   trControl = traincntrl)
+
+dtFitBagged <- train(x= setDT(dtTrain)[,-c('TARGET')],
+                y= dtTrain$TARGET,
+                method = 'treebag',
+                preProc = c('center','scale'),
+                tuneLength = 7,
+                metric = "ROC",
+                trControl = traincntrl)
+
+dtFitrf <- train(x= setDT(dtTrain)[,-c('TARGET')],
+                y= dtTrain$TARGET,
+                method = 'rf',
+                preProc = c('center','scale'),
+                tuneLength = 7,
+                metric = "ROC",
+                trControl = traincntrl)
+
+dtFitAdaboost <- train(x= setDT(dtTrain)[,-c('TARGET')],
+                y= dtTrain$TARGET,
+                method = 'adaboost',
+                preProc = c('center','scale'),
+                tuneLength = 7,
+                metric = "ROC",
+                trControl = traincntrl)
+
+dtFitXGboost <- train(x= setDT(dtTrain)[,-c('TARGET')],
+                y= dtTrain$TARGET,
+                method = 'xgbTree',
+                preProc = c('center','scale'),
+                tuneLength = 7,
+                metric = "ROC",
+                trControl = traincntrl)
+
+dtFitC5.0 <- train(x= setDT(dtTrain)[,-c('TARGET')],
+                y= dtTrain$TARGET,
+                method = 'C5.0',
+                preProc = c('center','scale'),
+                tuneLength = 7,
+                metric = "ROC",
+                trControl = traincntrl)
+alltreemodels <- resamples(list(CART = dtFitCART,  
+                                # PART = dtFitPART, 
+                                Bagged = dtFitBagged,
+                                RF = dtFitrf, AdaBoost = dtFitAdaboost, XGBoost = dtFitXGboost,
+                                C5.0 = dtFitC5.0))
+summary(alltreemodels)
+## 
+## Call:
+## summary.resamples(object = alltreemodels)
+## 
+## Models: CART, Bagged, RF, AdaBoost, XGBoost, C5.0 
+## Number of resamples: 10 
+## 
+## ROC 
+##               Min.   1st Qu.    Median      Mean   3rd Qu.      Max. NA's
+## CART     0.5358353 0.5855349 0.6309551 0.6203800 0.6531137 0.6867164    0
+## Bagged   0.6174044 0.6810626 0.7092669 0.6986837 0.7178428 0.7871738    0
+## RF       0.6632422 0.6845914 0.7121016 0.7171861 0.7391181 0.7840540    0
+## AdaBoost 0.6424973 0.6670363 0.6944643 0.6879643 0.7111940 0.7203208    0
+## XGBoost  0.6482805 0.7116373 0.7196662 0.7209360 0.7408339 0.7662880    0
+## C5.0     0.6225291 0.6768362 0.6945022 0.6990012 0.7174486 0.7908901    0
+## 
+## Sens 
+##               Min.   1st Qu.    Median      Mean   3rd Qu.      Max. NA's
+## CART     0.4210526 0.5420040 0.5526316 0.5591768 0.5833333 0.7179487    0
+## Bagged   0.5000000 0.6153846 0.6366397 0.6446019 0.7059717 0.7948718    0
+## RF       0.5000000 0.5705128 0.6025641 0.6165992 0.6644737 0.7894737    0
+## AdaBoost 0.4736842 0.5128205 0.6231444 0.6011471 0.6837045 0.7105263    0
+## XGBoost  0.5526316 0.5743927 0.6282051 0.6244265 0.6536775 0.7105263    0
+## C5.0     0.5641026 0.5961538 0.6578947 0.6479757 0.6902834 0.7179487    0
+## 
+## Spec 
+##               Min.   1st Qu.    Median      Mean   3rd Qu.      Max. NA's
+## CART     0.4889868 0.5584989 0.6019683 0.5976568 0.6387301 0.7004405    0
+## Bagged   0.5960265 0.6178414 0.6416620 0.6424002 0.6600539 0.7048458    0
+## RF       0.6079295 0.6321586 0.6549168 0.6563157 0.6855727 0.6909492    0
+## AdaBoost 0.6004415 0.6199638 0.6284462 0.6357825 0.6497797 0.6982379    0
+## XGBoost  0.6475771 0.6798995 0.7034163 0.6975445 0.7112945 0.7417219    0
+## C5.0     0.5518764 0.6066167 0.6218285 0.6357752 0.6501274 0.7356828    0
+I will be using the model with the best Accuracy
+
+dtTest$C5.0class <- predict(dtFitC5.0, dtTest)
+dtTest$C5.0probs <- predict(dtFitC5.0, newdata = dtTest , type = "prob")
+
+confusionMatrix(data = dtTest$C5.0class,
+ reference = dtTest$TARGET,
+ positive = "Yes")
+## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction  No Yes
+##        No   37 277
+##        Yes  11 289
+##                                          
+##                Accuracy : 0.5309         
+##                  95% CI : (0.4906, 0.571)
+##     No Information Rate : 0.9218         
+##     P-Value [Acc > NIR] : 1              
+##                                          
+##                   Kappa : 0.0796         
+##  Mcnemar's Test P-Value : <2e-16         
+##                                          
+##             Sensitivity : 0.5106         
+##             Specificity : 0.7708         
+##          Pos Pred Value : 0.9633         
+##          Neg Pred Value : 0.1178         
+##              Prevalence : 0.9218         
+##          Detection Rate : 0.4707         
+##    Detection Prevalence : 0.4886         
+##       Balanced Accuracy : 0.6407         
+##                                          
+##        'Positive' Class : Yes            
+## 
+It is interesting that there are a bunch that are being misclassified as ‘No’ when they are actually ‘Yes’
+
+# make test predictions
+#lgb_pred <- predict(dtFitXGboost, data = data.matrix(test), n = dtFitXGboost[1])
+#result <- data.frame(SK_ID_CURR = Id, TARGET = lgb_pred)
+#write.csv(result,"LGBM.csv", row.names = F)
