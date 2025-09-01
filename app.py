@@ -68,4 +68,16 @@ try:
 resp = requests.post(API_URL, json=payload, headers={"x-api-key": API_KEY}, timeout=20)
 if resp.status_code == 200:
 r = resp.json()
-st.subheader(f"Scor
+st.subheader(f"Score d'éligibilité : {r['score']*100:.1f}% — {r['label']}")
+                st.info(r.get('explain_text', 'Aucune explication fournie'))
+                with st.expander("Détails de l'explication"):
+                    st.json(r.get('explain_details', {}))
+            else:
+                st.error(f"Erreur API: {resp.status_code} - {resp.text}")
+        except Exception as e:
+            st.error(f"Erreur réseau / timeout: {e}")
+
+# Main area - placeholders pour graphiques
+st.markdown("---")
+st.write("Indicateurs descriptifs (exemples)")
+st.write("Ici on pourra afficher : histogrammes des revenus, comparaison client vs population, etc.")
