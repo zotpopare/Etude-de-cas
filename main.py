@@ -5,7 +5,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import joblib
 import numpy as np
-import traceback
 
 # Optional: SHAP
 try:
@@ -42,29 +41,28 @@ preproc = None
 explainer = None
 
 if os.path.exists(MODEL_PATH):
-    model = joblib.load(MODEL_PATH)
-else:
-    print("WARNING: model.pkl not found. Place your trained model at models/model.pkl")
+    try:
+        model = joblib.load(MODEL_PATH)
+    except Exception as e:
+        print(f"Erreur lors du chargement du modèle : {e}")
 
 if os.path.exists(PREPROC_PATH):
     try:
         preproc = joblib.load(PREPROC_PATH)
-    except Exception:
-        preproc = None
+    except Exception as e:
+        print(f"Erreur lors du chargement du préprocesseur : {e}")
 
 # init SHAP explainer if possible
 if SHAP_AVAILABLE and model is not None:
     try:
-        # Tree models -> TreeExplainer, else KernelExplainer (may be slow)
-        if hasattr(model, "predict_proba") and ("Tree" in str(type(model)) or "XGB" in str(type(model))):
+        if hasattr(model, "predict_proba") and (
+            "Tree" in str(type(model)) or "XGB" in str(type(model))
+        ):
             explainer = shap.TreeExplainer(model)
-        else:
-            # sample background for KernelExplainer if you have preproc/training data; this is a placeholder
-            explainer = None
-    except Exception:
-        explainer = None
+    except Exception as e:
+        print(f"Impossible d'initialiser SHAP explainer : {e}")
 
-# Pydantic schema - adapte selon tes features
+# Pydantic schema
 class ClientData(BaseModel):
     client_id: str
     age: int
@@ -75,14 +73,12 @@ class ClientData(BaseModel):
     employment_status: str
     housing_status: str
 
-# Auth dependency (simple API key in header)
+# Auth dependency
 def verify_api_key(x_api_key: str = Header(...)):
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
 def preprocess_input(data: ClientData):
-    # IMPORTANT : adapte l'ordre et encodage aux colonnes de ton modèle
-    # Exemple minimal : numeric conversion + simple encoding pour deux cat features
     features = [
         data.age,
         data.income,
@@ -97,7 +93,6 @@ def preprocess_input(data: ClientData):
         try:
             X = preproc.transform(X)
         except Exception:
-            # si preproc a une autre interface, laisse tomber et renvoie X brut
             pass
     return X
 
@@ -119,21 +114,22 @@ def predict(data: ClientData):
         raise HTTPException(status_code=500, detail="Model not loaded on server.")
     try:
         X = preprocess_input(data)
-        proba = float(model.predict_proba(X)[0][1])  # probabilité d'acceptation
+        proba = float(model.predict_proba(X)[0][1])
         label = "Eligible" if proba >= 0.5 else "Non-eligible"
 
-        # tentative d'explication SHAP
         explain = {"top_positive_features": [], "top_negative_features": []}
         if SHAP_AVAILABLE and explainer is not None:
             try:
                 shap_values = explainer.shap_values(X)
-                # shap_values shape depends on model; handle binary classification
                 if isinstance(shap_values, list):
-                    sv = shap_values[1][0]  # classe positive
+                    sv = shap_values[1][0]
                 else:
                     sv = shap_values[0]
-                # map to feature names: adapt these names to ton modèle
-                feature_names = ["age","income","credit_score","existing_loans","loan_amount_requested","employment_salaried","housing_own"]
+                feature_names = [
+                    "age", "income", "credit_score",
+                    "existing_loans", "loan_amount_requested",
+                    "employment_salaried", "housing_own"
+                ]
                 contributions = list(zip(feature_names, sv.tolist()))
                 contributions_sorted = sorted(contributions, key=lambda x: x[1], reverse=True)
                 top_pos = [(f, float(v)) for f, v in contributions_sorted if v > 0][:5]
@@ -141,10 +137,8 @@ def predict(data: ClientData):
                 explain["top_positive_features"] = [[f, round(v, 4)] for f, v in top_pos]
                 explain["top_negative_features"] = [[f, round(v, 4)] for f, v in top_neg]
             except Exception:
-                explain = {"top_positive_features": [], "top_negative_features": []}
+                pass
         else:
-            # fallback heuristics : exemple basique
-            # (à remplacer par logique métier issue du notebook)
             if data.income > 40000:
                 explain["top_positive_features"].append(["income", 0.12])
             if data.existing_loans <= 1:
@@ -157,8 +151,10 @@ def predict(data: ClientData):
             "score": round(proba, 4),
             "label": label,
             "explain_text": generate_plain_text(explain),
-            "explain_details": explain
+            "explain_details": explain,
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
 @app.get("/health")
 def health():
