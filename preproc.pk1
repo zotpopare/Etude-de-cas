@@ -1,1 +1,5 @@
+import joblib
+joblib.dump(model, "models/model.pkl")
+# si tu as un pipeline ou scaler/encoder
+joblib.dump(preproc, "models/preproc.pkl")
 
