@@ -1,1 +1,9 @@
+fastapi
+uvicorn[standard]
+numpy
+joblib
+scikit-learn
+pandas
+shap
+python-dotenv
 
