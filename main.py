@@ -11,7 +11,7 @@ import traceback
 try:
     import shap
     SHAP_AVAILABLE = True
-#except Exception:
+except Exception:
     SHAP_AVAILABLE = False
 
 API_KEY = os.getenv("API_KEY", "dev-secret-key")  # en prod : définir via env
