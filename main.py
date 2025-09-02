@@ -17,6 +17,7 @@ API_KEY = os.getenv("API_KEY", "dev-secret-key")  # en prod : définir via env
 
 app = FastAPI(title="NeoBanque Loan Scoring API")
 
+
 # CORS - en dev allow *, en prod restreindre aux domaines connus (ex: ton Streamlit)
 app.add_middleware(
     CORSMiddleware,
