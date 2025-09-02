@@ -1,9 +1,11 @@
 fastapi
-uvicorn[standard]
-numpy
+uvicorn
+pydantic
 joblib
+numpy
 scikit-learn
-pandas
 shap
-python-dotenv
+matplotlib
+streamlit
+requests
 
