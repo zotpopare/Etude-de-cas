@@ -1,11 +1,13 @@
 import streamlit as st
 import requests
 
-API_URL = "API_URL = https://etude-de-cas.onrender.com"
+# URL de ton API Render (sans doublon) et clé API
+API_URL = "https://etude-de-cas.onrender.com"
 API_KEY = "dev-secret-key"
 
 st.title("NeoBanque Dashboard Conseiller")
 
+# Inputs client
 client_id = st.text_input("Client ID")
 age = st.number_input("Âge", 18, 100, 30)
 income = st.number_input("Revenu", 0, 500000, 50000)
@@ -26,18 +28,24 @@ if st.button("Prédire"):
         "employment_status": employment_status,
         "housing_status": housing_status
     }
+    
     try:
+        # Requête POST vers ton endpoint /predict
         response = requests.post(
             f"{API_URL}/predict",
             headers={"x-api-key": API_KEY},
             json=data,
             timeout=10
         )
+
         if response.status_code == 200:
             result = response.json()
-            st.success(f"{result['label']} (score = {result['score']})")
+            st.subheader("Résultat du scoring")
+            st.success(f"Client {result['client_id']}: {result['label']} (score = {result['score']})")
+            st.subheader("Explication")
             st.write(result["explain_text"])
         else:
             st.error(f"Erreur {response.status_code} : {response.text}")
-    except Exception as e:
+
+    except requests.exceptions.RequestException as e:
         st.error(f"Erreur API : {e}")
