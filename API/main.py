@@ -17,49 +17,35 @@ API_KEY = os.getenv("API_KEY", "dev-secret-key")  # en prod : définir via env
 
 app = FastAPI(title="NeoBanque Loan Scoring API")
 
-
-# CORS - en dev allow *, en prod restreindre aux domaines connus (ex: ton Streamlit)
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # à restreindre en prod
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Chargement modèle et préproc
-MODEL_PATH = os.path.join("..", "models", "model.pkl")
-PREPROC_PATH = os.path.join("..", "models", "preproc.pkl")
-
-# try alternative path when running from root
-if not os.path.exists(MODEL_PATH):
-    MODEL_PATH = os.path.join("models", "model.pkl")
-if not os.path.exists(PREPROC_PATH):
-    PREPROC_PATH = os.path.join("models", "preproc.pkl")
-
-model = None
-preproc = None
+# Chargement pipeline
+PIPELINE_PATH = os.path.join("models", "pipeline.pkl")
+pipeline = None
 explainer = None
 
-if os.path.exists(MODEL_PATH):
+if os.path.exists(PIPELINE_PATH):
     try:
-        model = joblib.load(MODEL_PATH)
+        pipeline = joblib.load(PIPELINE_PATH)
     except Exception as e:
-        print(f"Erreur lors du chargement du modèle : {e}")
+        print(f"Erreur lors du chargement du pipeline : {e}")
+else:
+    print("pipeline.pkl introuvable !")
 
-if os.path.exists(PREPROC_PATH):
+# SHAP explainer
+if SHAP_AVAILABLE and pipeline is not None:
     try:
-        preproc = joblib.load(PREPROC_PATH)
-    except Exception as e:
-        print(f"Erreur lors du chargement du préprocesseur : {e}")
-
-# init SHAP explainer if possible
-if SHAP_AVAILABLE and model is not None:
-    try:
-        if hasattr(model, "predict_proba") and (
-            "Tree" in str(type(model)) or "XGB" in str(type(model))
+        if hasattr(pipeline, "predict_proba") and (
+            "Tree" in str(type(pipeline)) or "XGB" in str(type(pipeline))
         ):
-            explainer = shap.TreeExplainer(model)
+            explainer = shap.TreeExplainer(pipeline)
     except Exception as e:
         print(f"Impossible d'initialiser SHAP explainer : {e}")
 
@@ -80,22 +66,19 @@ def verify_api_key(x_api_key: str = Header(...)):
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
 def preprocess_input(data: ClientData):
-    features = [
-        data.age,
-        data.income,
-        data.credit_score,
-        data.existing_loans,
-        data.loan_amount_requested,
-        1 if data.employment_status.lower() == "salaried" else 0,
-        1 if data.housing_status.lower() == "own" else 0,
-    ]
-    X = np.array(features).reshape(1, -1)
-    if preproc is not None:
-        try:
-            X = preproc.transform(X)
-        except Exception:
-            pass
-    return X
+    """Prépare les données sous forme de DataFrame pour le pipeline"""
+    # Si ton pipeline attend un DataFrame, adapte cette partie
+    import pandas as pd
+    df = pd.DataFrame([{
+        "age": data.age,
+        "income": data.income,
+        "credit_score": data.credit_score,
+        "existing_loans": data.existing_loans,
+        "loan_amount_requested": data.loan_amount_requested,
+        "employment_status": data.employment_status,
+        "housing_status": data.housing_status,
+    }])
+    return df
 
 def generate_plain_text(explain):
     pos = ", ".join([f"{f[0]}" for f in explain.get("top_positive_features", [])])
@@ -111,26 +94,19 @@ def generate_plain_text(explain):
 
 @app.post("/predict", dependencies=[Depends(verify_api_key)])
 def predict(data: ClientData):
-    if model is None:
-        raise HTTPException(status_code=500, detail="Model not loaded on server.")
+    if pipeline is None:
+        raise HTTPException(status_code=500, detail="Pipeline non chargé sur le serveur.")
     try:
         X = preprocess_input(data)
-        proba = float(model.predict_proba(X)[0][1])
+        proba = float(pipeline.predict_proba(X)[0][1])
         label = "Eligible" if proba >= 0.5 else "Non-eligible"
 
         explain = {"top_positive_features": [], "top_negative_features": []}
         if SHAP_AVAILABLE and explainer is not None:
             try:
                 shap_values = explainer.shap_values(X)
-                if isinstance(shap_values, list):
-                    sv = shap_values[1][0]
-                else:
-                    sv = shap_values[0]
-                feature_names = [
-                    "age", "income", "credit_score",
-                    "existing_loans", "loan_amount_requested",
-                    "employment_salaried", "housing_own"
-                ]
+                sv = shap_values[1][0] if isinstance(shap_values, list) else shap_values[0]
+                feature_names = list(X.columns)
                 contributions = list(zip(feature_names, sv.tolist()))
                 contributions_sorted = sorted(contributions, key=lambda x: x[1], reverse=True)
                 top_pos = [(f, float(v)) for f, v in contributions_sorted if v > 0][:5]
@@ -140,6 +116,7 @@ def predict(data: ClientData):
             except Exception:
                 pass
         else:
+            # fallback heuristics
             if data.income > 40000:
                 explain["top_positive_features"].append(["income", 0.12])
             if data.existing_loans <= 1:
