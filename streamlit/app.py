@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 
-API_URL = "http://127.0.0.1:8000"
+API_URL = "API_URL = "https://<ton-service>.onrender.com/predict"
 API_KEY = "dev-secret-key"
 
 st.title("NeoBanque Dashboard Conseiller")
